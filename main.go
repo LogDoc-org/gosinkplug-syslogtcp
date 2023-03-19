@@ -8,36 +8,52 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/gurkankaymak/hocon"
 )
 
-var consumer func(entry gopapi.LogEntry) = func(entry gopapi.LogEntry) {
+var consumer = func(entry gopapi.LogEntry) {
 	fmt.Println("Passed entry: ", entry)
 }
+var bsdFormat = "Jan _2 15:04:05"
+var delimiters = []byte{'\r', '\n'}
 
 var tmpMap = make(map[string]sysMsg, 0)
 
-func ConfigSectionName() string {
-	return "syslogtcp"
-}
+func Configure(config hocon.Config, consumer0 func(entry gopapi.LogEntry)) {
+	consumer = consumer0
 
-func Configure(interface{}) {
+	if config.Get("date_locale") != nil {
+		bsdFormat = config.GetString("date_locale")
+	}
 
-}
+	if config.Get("tcp_delimiters") != nil {
+		delimiters = make([]byte, 0)
+		for code := range config.GetIntSlice("tcp_delimiters") {
+			delimiters = append(delimiters, byte(code))
+		}
+	}
 
-func SetEntryConsumer(f func(entry gopapi.LogEntry)) {
-	consumer = f
+	if len(delimiters) == 0 {
+		delimiters[0] = byte('\r')
+		delimiters[1] = byte('\n')
+	}
 }
 
 func SupportedTypes() []gopapi.ConnectionType {
-	return []gopapi.ConnectionType{{Tcp: true, Name: "Syslog-tcp"}}
+	return []gopapi.ConnectionType{
+		{Tcp: true, Name: "Syslog-TCP"},
+		{Tcp: false, Name: "Syslog-UDP"},
+	}
 }
 
-func Chunk(data0 []byte, source string) []byte {
+func Chunk(data0 []byte, source string, tcp bool) []byte {
 	var sd, has = tmpMap[source]
 
 	if !has {
 		sd = newMsg()
 		sd.src = source
+		sd.tcp = tcp
 		tmpMap[source] = sd
 	}
 
@@ -107,8 +123,6 @@ func logType(idx int, data []byte, sd sysMsg) {
 	}
 }
 
-var bsdFormat = "Jan 02 15:04:05" // todo configure
-
 func bsdDate(idx int, data []byte, sd sysMsg) {
 	i := idx
 
@@ -121,7 +135,10 @@ func bsdDate(idx int, data []byte, sd sysMsg) {
 		return
 	}
 
-	if t, err := time.Parse("Jan 02 15:04:05", string(data[i:i+len(bsdFormat)])); err == nil {
+	if t, err := time.Parse(bsdFormat, string(data[i:i+len(bsdFormat)])); err == nil {
+		if strings.Index(bsdFormat, "06") == -1 {
+			t = time.Date(time.Now().Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		}
 		sd.entry.SrcTime = t.Format("20060102150405000")
 	}
 
@@ -261,7 +278,6 @@ func structs(idx int, data []byte, sd sysMsg) {
 
 func makeStruct(idx int, data []byte, sd sysMsg) {
 	var s = sysStruct{}
-	//final SysStruct struct = new SysStruct();
 	var (
 		left  = -1
 		right = -1
@@ -348,8 +364,6 @@ func makeStruct(idx int, data []byte, sd sysMsg) {
 	}
 }
 
-var delimiters []byte
-
 func body(idx int, data []byte, sd sysMsg) {
 	i := idx
 	for ; i < len(data)-1 && unicode.IsSpace(rune(data[i])); i++ {
@@ -357,7 +371,7 @@ func body(idx int, data []byte, sd sysMsg) {
 
 	from := i
 	till := len(data)
-	if len(delimiters) != 0 {
+	if sd.tcp && len(delimiters) != 0 {
 		for ; i < len(data); i++ {
 			if bytes.IndexByte(delimiters, data[i]) != -1 {
 				till = i
@@ -404,7 +418,7 @@ func body(idx int, data []byte, sd sysMsg) {
 	delete(tmpMap, sd.src)
 
 	if len(data) > till {
-		Chunk(data[i:], sd.src)
+		Chunk(data[i:], sd.src, sd.tcp)
 	}
 }
 
@@ -504,7 +518,7 @@ func (ss *sysStruct) equals(s0 sysStruct) bool {
 		return false
 	}
 
-	for k, _ := range ss.values {
+	for k := range ss.values {
 		if !strings.EqualFold(ss.values[k], s0.values[k]) {
 			return false
 		}
@@ -526,6 +540,7 @@ type sysMsg struct {
 	structs  []sysStruct
 	src      string
 	entry    gopapi.LogEntry
+	tcp      bool
 }
 
 func newMsg() sysMsg {

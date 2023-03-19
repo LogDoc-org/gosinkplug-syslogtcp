@@ -1,3 +1,3 @@
-# syslogtcp
+# ldsyslog
 
-Logdoc plugin. Syslog handler, TCP variant
+Logdoc plugin. Syslog handler, TCP/UDP supported

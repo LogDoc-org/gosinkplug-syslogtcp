@@ -1,4 +1,4 @@
-NAME=syslogtcp
+NAME=ldsyslog
 GOFLAGS=-buildmode=plugin
 
 all: $(NAME).so
