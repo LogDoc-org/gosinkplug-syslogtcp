@@ -20,8 +20,12 @@ var delimiters = []byte{'\r', '\n'}
 
 var tmpMap = make(map[string]sysMsg, 0)
 
-func Configure(config hocon.Config, consumer0 func(entry gopapi.LogEntry)) {
+func Configure(config *hocon.Config, consumer0 func(entry gopapi.LogEntry)) {
 	consumer = consumer0
+
+	if config == nil {
+		return
+	}
 
 	if config.Get("date_locale") != nil {
 		bsdFormat = config.GetString("date_locale")
@@ -544,5 +548,5 @@ type sysMsg struct {
 }
 
 func newMsg() sysMsg {
-	return sysMsg{priority: -1, structs: make([]sysStruct, 0)}
+	return sysMsg{priority: -1, structs: make([]sysStruct, 0), entry: gopapi.NewEntry()}
 }
